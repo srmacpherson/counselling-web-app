@@ -15,6 +15,29 @@ type Enquiry = {
   status: string;
   preferredContactMethod: string | null;
   receivedAt: string;
+  clientId: string | null;
+};
+
+type Client = {
+  id: string;
+  firstName: string;
+  lastName: string | null;
+  email: string | null;
+  phone: string | null;
+  preferredContactMethod: string | null;
+  createdAt: string;
+};
+
+type Booking = {
+  id: string;
+  clientId: string;
+  enquiryId: string | null;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  location: string | null;
+  notes: string | null;
+  client: Client;
 };
 
 type DashboardStats = {
@@ -298,15 +321,29 @@ function AdminDashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [stats, setStats] = useState<DashboardStats>({ openEnquiries: 0, upcomingSessions: 0, alerts: 0 });
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingForm, setBookingForm] = useState({
+    clientId: '',
+    enquiryId: '',
+    startsAt: new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16),
+    endsAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().slice(0, 16),
+    location: '',
+    notes: '',
+  });
 
   const loadDashboard = async () => {
-    const [dashboardResponse, enquiryResponse] = await Promise.all([
+    const [dashboardResponse, enquiryResponse, clientResponse, bookingResponse] = await Promise.all([
       api<{ stats: DashboardStats }>('/api/admin/dashboard'),
       api<{ enquiries: Enquiry[] }>('/api/admin/enquiries'),
+      api<{ clients: Client[] }>('/api/admin/clients'),
+      api<{ bookings: Booking[] }>('/api/admin/bookings'),
     ]);
 
     setStats(dashboardResponse.stats);
     setEnquiries(enquiryResponse.enquiries);
+    setClients(clientResponse.clients);
+    setBookings(bookingResponse.bookings);
   };
 
   useEffect(() => {
@@ -327,6 +364,39 @@ function AdminDashboardPage() {
       method: 'PATCH',
       body: JSON.stringify({ status: nextStatus }),
     });
+
+    await loadDashboard();
+  };
+
+  const handleConvertToClient = async (enquiryId: string) => {
+    await api(`/api/admin/enquiries/${enquiryId}/convert-to-client`, {
+      method: 'POST',
+    });
+
+    await loadDashboard();
+  };
+
+  const handleCreateBooking = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!bookingForm.clientId) {
+      return;
+    }
+
+    await api('/api/admin/bookings', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...bookingForm,
+        enquiryId: bookingForm.enquiryId || null,
+      }),
+    });
+
+    setBookingForm((current) => ({
+      ...current,
+      enquiryId: '',
+      location: '',
+      notes: '',
+    }));
 
     await loadDashboard();
   };
@@ -399,7 +469,147 @@ function AdminDashboardPage() {
                     </div>
                   </div>
                   <p className="mt-3 text-sm text-slate-600">{enquiry.message ?? 'No message provided.'}</p>
-                  <p className="mt-2 text-xs text-slate-500">Received {new Date(enquiry.receivedAt).toLocaleString()}</p>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs text-slate-500">Received {new Date(enquiry.receivedAt).toLocaleString()}</p>
+                    {!enquiry.clientId ? (
+                      <button
+                        type="button"
+                        onClick={() => handleConvertToClient(enquiry.id)}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700"
+                      >
+                        Convert to client
+                      </button>
+                    ) : (
+                      <span className="text-xs font-medium text-emerald-700">Client created</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="mt-8 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Clients</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Active client list</h2>
+
+            <div className="mt-4 space-y-3">
+              {clients.length === 0 ? (
+                <p className="text-sm text-slate-500">No clients yet.</p>
+              ) : (
+                clients.map((client) => (
+                  <div key={client.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium text-slate-900">{client.firstName} {client.lastName ?? ''}</p>
+                    <p className="text-sm text-slate-500">{client.email ?? 'No email provided'}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <form onSubmit={handleCreateBooking} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Scheduling</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Create booking</h2>
+
+            <div className="mt-4 space-y-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Client
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  value={bookingForm.clientId}
+                  onChange={(event) => setBookingForm((current) => ({ ...current, clientId: event.target.value }))}
+                >
+                  <option value="">Select client</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.firstName} {client.lastName ?? ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm font-medium text-slate-700">
+                Related enquiry
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  value={bookingForm.enquiryId}
+                  onChange={(event) => setBookingForm((current) => ({ ...current, enquiryId: event.target.value }))}
+                >
+                  <option value="">No specific enquiry</option>
+                  {enquiries.map((enquiry) => (
+                    <option key={enquiry.id} value={enquiry.id}>
+                      {enquiry.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Start
+                  <input
+                    type="datetime-local"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                    value={bookingForm.startsAt}
+                    onChange={(event) => setBookingForm((current) => ({ ...current, startsAt: event.target.value }))}
+                  />
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  End
+                  <input
+                    type="datetime-local"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                    value={bookingForm.endsAt}
+                    onChange={(event) => setBookingForm((current) => ({ ...current, endsAt: event.target.value }))}
+                  />
+                </label>
+              </div>
+
+              <label className="block text-sm font-medium text-slate-700">
+                Location
+                <input
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  value={bookingForm.location}
+                  onChange={(event) => setBookingForm((current) => ({ ...current, location: event.target.value }))}
+                />
+              </label>
+
+              <label className="block text-sm font-medium text-slate-700">
+                Notes
+                <textarea
+                  rows={3}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  value={bookingForm.notes}
+                  onChange={(event) => setBookingForm((current) => ({ ...current, notes: event.target.value }))}
+                />
+              </label>
+
+              <button
+                type="submit"
+                className="w-full rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-800"
+              >
+                Create booking
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Schedule</p>
+          <h2 className="mt-2 text-xl font-semibold text-slate-900">Upcoming bookings</h2>
+
+          <div className="mt-4 space-y-3">
+            {bookings.length === 0 ? (
+              <p className="text-sm text-slate-500">No bookings scheduled.</p>
+            ) : (
+              bookings.map((booking) => (
+                <div key={booking.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="font-medium text-slate-900">{booking.client.firstName} {booking.client.lastName ?? ''}</p>
+                  <p className="text-sm text-slate-500">
+                    {new Date(booking.startsAt).toLocaleString()} to {new Date(booking.endsAt).toLocaleString()}
+                  </p>
                 </div>
               ))
             )}
