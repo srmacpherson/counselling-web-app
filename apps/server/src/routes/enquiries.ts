@@ -121,10 +121,9 @@ adminEnquiriesRouter.get('/me', requireAdmin, (req, res) => {
 });
 
 adminEnquiriesRouter.get('/dashboard', requireAdmin, async (_req, res) => {
-  const [openEnquiries, upcomingSessions, alertCount] = await Promise.all([
+  const [openEnquiries, upcomingSessions] = await Promise.all([
     prisma.enquiry.count({ where: { status: { in: ['NEW', 'AWAITING_RESPONSE'] } } }),
     prisma.booking.count({ where: { startsAt: { gte: new Date() }, status: 'SCHEDULED' } }),
-    prisma.enquiry.count({ where: { status: 'AWAITING_RESPONSE' } }),
   ]);
 
   res.json({
@@ -132,7 +131,6 @@ adminEnquiriesRouter.get('/dashboard', requireAdmin, async (_req, res) => {
     stats: {
       openEnquiries,
       upcomingSessions,
-      alerts: alertCount,
     },
   });
 });
@@ -231,6 +229,53 @@ adminEnquiriesRouter.get('/clients/:id', requireAdmin, async (req, res) => {
   });
 });
 
+adminEnquiriesRouter.delete('/clients/:id', requireAdmin, async (req, res) => {
+  const clientId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const existingClient = await prisma.client.findUnique({
+    where: { id: clientId },
+  });
+
+  if (!existingClient) {
+    res.status(404).json({
+      ok: false,
+      message: 'Client not found.',
+    });
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.booking.deleteMany({
+      where: { clientId },
+    });
+
+    await tx.enquiry.updateMany({
+      where: { clientId },
+      data: { clientId: null },
+    });
+
+    await tx.auditEvent.create({
+      data: {
+        entityType: 'CLIENT',
+        entityId: clientId,
+        action: 'CLIENT_DELETED',
+        details: `Deleted client ${existingClient.firstName} ${existingClient.lastName ?? ''}`.trim(),
+        adminUserId: req.admin?.id ?? null,
+        clientId,
+      },
+    });
+
+    await tx.client.delete({
+      where: { id: clientId },
+    });
+  });
+
+  res.json({
+    ok: true,
+    deletedClientId: clientId,
+  });
+});
+
 adminEnquiriesRouter.post('/enquiries/:id/convert-to-client', requireAdmin, async (req, res) => {
   const enquiryId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const enquiry = await prisma.enquiry.findUnique({ where: { id: enquiryId } });
@@ -325,49 +370,6 @@ adminEnquiriesRouter.get('/activity', requireAdmin, async (_req, res) => {
     ok: true,
     auditEvents,
     notifications,
-  });
-});
-
-adminEnquiriesRouter.post('/enquiries/:id/acknowledge', requireAdmin, async (req, res) => {
-  const enquiryId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const enquiry = await prisma.enquiry.findUnique({ where: { id: enquiryId } });
-
-  if (!enquiry) {
-    res.status(404).json({
-      ok: false,
-      message: 'Enquiry not found.',
-    });
-    return;
-  }
-
-  const notification = await prisma.emailNotification.create({
-    data: {
-      type: 'ENQUIRY_ACKNOWLEDGEMENT',
-      status: 'QUEUED',
-      recipientEmail: enquiry.email,
-      subject: 'Thanks for getting in touch',
-      enquiryId: enquiry.id,
-      adminUserId: req.admin?.id ?? null,
-    },
-  });
-
-  await prisma.enquiry.update({
-    where: { id: enquiry.id },
-    data: { status: 'AWAITING_RESPONSE' },
-  });
-
-  await createAuditEvent({
-    entityType: 'ENQUIRY',
-    entityId: enquiry.id,
-    action: 'ACKNOWLEDGEMENT_EMAIL_QUEUED',
-    details: `Queued acknowledgement email to ${enquiry.email}`,
-    adminUserId: req.admin?.id ?? null,
-    enquiryId: enquiry.id,
-  });
-
-  res.status(201).json({
-    ok: true,
-    notification,
   });
 });
 

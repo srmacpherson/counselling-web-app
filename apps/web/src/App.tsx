@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 
 type User = {
   id: string;
@@ -26,6 +26,7 @@ type Client = {
   phone: string | null;
   preferredContactMethod: string | null;
   createdAt: string;
+  bookings?: Booking[];
 };
 
 type Booking = {
@@ -37,7 +38,15 @@ type Booking = {
   status: string;
   location: string | null;
   notes: string | null;
+  cancelledAt?: string | null;
+  timezone?: string | null;
   client: Client;
+  enquiry?: {
+    id: string;
+    name: string;
+    email: string;
+    status: string;
+  } | null;
 };
 
 type AuditEvent = {
@@ -61,8 +70,26 @@ type Notification = {
 type DashboardStats = {
   openEnquiries: number;
   upcomingSessions: number;
-  alerts: number;
 };
+
+const BOOKING_STATUS_LABELS: Record<string, string> = {
+  SCHEDULED: 'Scheduled',
+  CANCELLED: 'Cancelled',
+  COMPLETED: 'Completed',
+  NO_SHOW: 'No show',
+};
+
+const ENQUIRY_STATUS_LABELS: Record<string, string> = {
+  NEW: 'New',
+  AWAITING_RESPONSE: 'Awaiting response',
+  CONVERTED_TO_CLIENT: 'Converted to client',
+  CLOSED: 'Closed',
+  SPAM: 'Spam',
+};
+
+function formatStatusLabel(value: string, labels: Record<string, string>) {
+  return labels[value] ?? value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 const API_BASE = 'http://localhost:4000';
 
@@ -334,10 +361,229 @@ function ProtectedAdminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function BookingCard({ booking, onRefresh, showClientName = true }: { booking: Booking; onRefresh: () => Promise<void>; showClientName?: boolean }) {
+  const [rescheduleForm, setRescheduleForm] = useState({
+    startsAt: new Date(booking.startsAt).toISOString().slice(0, 16),
+    endsAt: new Date(booking.endsAt).toISOString().slice(0, 16),
+  });
+
+  useEffect(() => {
+    setRescheduleForm({
+      startsAt: new Date(booking.startsAt).toISOString().slice(0, 16),
+      endsAt: new Date(booking.endsAt).toISOString().slice(0, 16),
+    });
+  }, [booking.startsAt, booking.endsAt]);
+
+  const handleReschedule = async () => {
+    await api(`/api/admin/bookings/${booking.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        startsAt: rescheduleForm.startsAt,
+        endsAt: rescheduleForm.endsAt,
+        status: 'SCHEDULED',
+      }),
+    });
+
+    await onRefresh();
+  };
+
+  const handleCancel = async () => {
+    await api(`/api/admin/bookings/${booking.id}/cancel`, {
+      method: 'POST',
+    });
+
+    await onRefresh();
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          {showClientName ? (
+            <p className="font-medium text-slate-900">{booking.client.firstName} {booking.client.lastName ?? ''}</p>
+          ) : null}
+          {booking.enquiry ? (
+            <p className="text-sm text-slate-500">{booking.enquiry.name} · {booking.enquiry.email}</p>
+          ) : null}
+        </div>
+        <span className="inline-flex w-fit rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">
+          {formatStatusLabel(booking.status, BOOKING_STATUS_LABELS)}
+        </span>
+      </div>
+
+      <p className="mt-3 text-sm text-slate-600">
+        {new Date(booking.startsAt).toLocaleString()} to {new Date(booking.endsAt).toLocaleString()}
+      </p>
+
+      {booking.location ? <p className="mt-1 text-sm text-slate-500">Location: {booking.location}</p> : null}
+      {booking.notes ? <p className="mt-1 text-sm text-slate-500">Notes: {booking.notes}</p> : null}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <label className="block text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+          Start
+          <input
+            type="datetime-local"
+            value={rescheduleForm.startsAt}
+            onChange={(event) => setRescheduleForm((current) => ({ ...current, startsAt: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+          />
+        </label>
+
+        <label className="block text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+          End
+          <input
+            type="datetime-local"
+            value={rescheduleForm.endsAt}
+            onChange={(event) => setRescheduleForm((current) => ({ ...current, endsAt: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={handleReschedule}
+          className="rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-brand-800"
+        >
+          Reschedule
+        </button>
+        <button
+          type="button"
+          onClick={handleCancel}
+          disabled={booking.status === 'CANCELLED'}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {booking.status === 'CANCELLED' ? 'Cancelled' : 'Cancel'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClientDetailPage() {
+  const navigate = useNavigate();
+  const { clientId } = useParams();
+  const [client, setClient] = useState<(Client & { bookings: Booking[] }) | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadClient = async () => {
+    if (!clientId) {
+      return;
+    }
+
+    const response = await api<{ client: Client & { bookings: Booking[] } }>(`/api/admin/clients/${clientId}`);
+    setClient(response.client);
+  };
+
+  useEffect(() => {
+    if (!clientId) {
+      navigate('/admin');
+      return;
+    }
+
+    loadClient()
+      .catch(() => navigate('/admin'))
+      .finally(() => setIsLoading(false));
+  }, [clientId, navigate]);
+
+  const upcomingBookings = (client?.bookings ?? []).filter((booking) => {
+    const bookingDate = new Date(booking.startsAt).getTime();
+    return bookingDate >= Date.now() && booking.status !== 'CANCELLED';
+  });
+
+  const previousBookings = (client?.bookings ?? []).filter((booking) => {
+    const bookingDate = new Date(booking.startsAt).getTime();
+    return bookingDate < Date.now() || booking.status === 'CANCELLED';
+  });
+
+  if (isLoading) {
+    return <main className="flex min-h-screen items-center justify-center bg-slate-100 text-slate-700">Loading client schedule…</main>;
+  }
+
+  if (!client) {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100 p-6 text-slate-800">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-8 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Client schedule</p>
+            <h1 className="mt-2 text-2xl font-semibold text-slate-900">
+              {client.firstName} {client.lastName ?? ''}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">{client.email ?? 'No email on file'}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/admin" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">
+              Back to dashboard
+            </Link>
+          </div>
+        </header>
+
+        <section className="mb-8 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Overview</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-sm text-slate-500">Upcoming</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{upcomingBookings.length}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-sm text-slate-500">History</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{previousBookings.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Contact</p>
+            <div className="mt-4 space-y-3 text-sm text-slate-600">
+              <p>Email: {client.email ?? 'Not provided'}</p>
+              <p>Phone: {client.phone ?? 'Not provided'}</p>
+              <p>Contact method: {client.preferredContactMethod ? client.preferredContactMethod.toLowerCase() : 'Not set'}</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Upcoming bookings</p>
+            <div className="mt-4 space-y-3">
+              {upcomingBookings.length === 0 ? (
+                <p className="text-sm text-slate-500">No upcoming bookings.</p>
+              ) : (
+                upcomingBookings.map((booking) => (
+                  <BookingCard key={booking.id} booking={booking} onRefresh={loadClient} showClientName={false} />
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Previous bookings</p>
+            <div className="mt-4 space-y-3">
+              {previousBookings.length === 0 ? (
+                <p className="text-sm text-slate-500">No previous bookings.</p>
+              ) : (
+                previousBookings.map((booking) => (
+                  <BookingCard key={booking.id} booking={booking} onRefresh={loadClient} showClientName={false} />
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function AdminDashboardPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
-  const [stats, setStats] = useState<DashboardStats>({ openEnquiries: 0, upcomingSessions: 0, alerts: 0 });
+  const [stats, setStats] = useState<DashboardStats>({ openEnquiries: 0, upcomingSessions: 0 });
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -403,12 +649,32 @@ function AdminDashboardPage() {
     await loadDashboard();
   };
 
-  const handleAcknowledgeEnquiry = async (enquiryId: string) => {
-    await api(`/api/admin/enquiries/${enquiryId}/acknowledge`, {
-      method: 'POST',
+  const handleDeleteClient = async (clientId: string, clientName: string) => {
+    const confirmed = window.confirm(
+      `Delete ${clientName}? This will permanently remove this client and their contact details.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await api(`/api/admin/clients/${clientId}`, {
+      method: 'DELETE',
     });
 
     await loadDashboard();
+  };
+
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
+
+  const handleCopyEmailClick = async (email: string) => {
+    if (!email || !navigator.clipboard) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    window.setTimeout(() => setCopiedEmail((current) => (current === email ? null : current)), 1200);
   };
 
   const handleCreateBooking = async (event: FormEvent<HTMLFormElement>) => {
@@ -453,7 +719,7 @@ function AdminDashboardPage() {
           </button>
         </header>
 
-        <section className="grid gap-4 md:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <p className="text-sm text-slate-500">Open enquiries</p>
             <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.openEnquiries}</p>
@@ -461,10 +727,6 @@ function AdminDashboardPage() {
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <p className="text-sm text-slate-500">Upcoming sessions</p>
             <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.upcomingSessions}</p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
-            <p className="text-sm text-slate-500">Alerts</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.alerts}</p>
           </div>
         </section>
 
@@ -485,21 +747,40 @@ function AdminDashboardPage() {
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
                       <p className="font-medium text-slate-900">{enquiry.name}</p>
-                      <p className="text-sm text-slate-500">{enquiry.email}</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <p className="text-sm text-slate-500">{enquiry.email}</p>
+                        <button
+                          type="button"
+                          aria-label={`Copy email address ${enquiry.email}`}
+                          title={copiedEmail === enquiry.email ? 'Copied' : `Copy ${enquiry.email}`}
+                          onClick={() => handleCopyEmailClick(enquiry.email)}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition ${copiedEmail === enquiry.email ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50'}`}
+                        >
+                          {copiedEmail === enquiry.email ? (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-3.5 w-3.5" aria-hidden="true">
+                              <path d="M5 12.5 9.2 16.7 19 6.9" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5" aria-hidden="true">
+                              <path d="M9 9.75A2.75 2.75 0 0 1 11.75 7h6.5A2.75 2.75 0 0 1 21 9.75v6.5A2.75 2.75 0 0 1 18.25 19h-6.5A2.75 2.75 0 0 1 9 16.25v-6.5Z" />
+                              <path d="M15 4.75A2.75 2.75 0 0 0 12.25 2h-6.5A2.75 2.75 0 0 0 3 4.75v6.5A2.75 2.75 0 0 0 5.75 14H9" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">{enquiry.status}</span>
+                      <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">{formatStatusLabel(enquiry.status, ENQUIRY_STATUS_LABELS)}</span>
                       <select
                         className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700"
                         value={enquiry.status}
                         onChange={(event) => handleStatusChange(enquiry.id, event.target.value)}
                       >
-                        <option value="NEW">NEW</option>
-                        <option value="CONTACTED">CONTACTED</option>
-                        <option value="AWAITING_RESPONSE">AWAITING_RESPONSE</option>
-                        <option value="CONVERTED_TO_CLIENT">CONVERTED_TO_CLIENT</option>
-                        <option value="CLOSED">CLOSED</option>
-                        <option value="SPAM">SPAM</option>
+                        <option value="NEW">New</option>
+                        <option value="AWAITING_RESPONSE">Awaiting response</option>
+                        <option value="CONVERTED_TO_CLIENT">Converted to client</option>
+                        <option value="CLOSED">Closed</option>
+                        <option value="SPAM">Spam</option>
                       </select>
                     </div>
                   </div>
@@ -518,14 +799,6 @@ function AdminDashboardPage() {
                       ) : (
                         <span className="text-xs font-medium text-emerald-700">Client created</span>
                       )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleAcknowledgeEnquiry(enquiry.id)}
-                        className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-800 transition hover:bg-brand-100"
-                      >
-                        Queue acknowledgement
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -545,8 +818,30 @@ function AdminDashboardPage() {
               ) : (
                 clients.map((client) => (
                   <div key={client.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium text-slate-900">{client.firstName} {client.lastName ?? ''}</p>
-                    <p className="text-sm text-slate-500">{client.email ?? 'No email provided'}</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{client.firstName} {client.lastName ?? ''}</p>
+                        <p className="text-sm text-slate-500">{client.email ?? 'No email provided'}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/admin/clients/${client.id}`}
+                          className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-800 transition hover:bg-brand-100"
+                        >
+                          View schedule
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClient(client.id, `${client.firstName} ${client.lastName ?? ''}`.trim() || 'Client')}
+                          className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-100"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {client.bookings?.filter((booking) => booking.status !== 'CANCELLED').length ?? 0} upcoming booking{client.bookings && client.bookings.filter((booking) => booking.status !== 'CANCELLED').length === 1 ? '' : 's'}
+                    </p>
                   </div>
                 ))
               )}
@@ -649,14 +944,11 @@ function AdminDashboardPage() {
             {bookings.length === 0 ? (
               <p className="text-sm text-slate-500">No bookings scheduled.</p>
             ) : (
-              bookings.map((booking) => (
-                <div key={booking.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="font-medium text-slate-900">{booking.client.firstName} {booking.client.lastName ?? ''}</p>
-                  <p className="text-sm text-slate-500">
-                    {new Date(booking.startsAt).toLocaleString()} to {new Date(booking.endsAt).toLocaleString()}
-                  </p>
-                </div>
-              ))
+              bookings
+                .filter((booking) => booking.status !== 'CANCELLED')
+                .map((booking) => (
+                  <BookingCard key={booking.id} booking={booking} onRefresh={loadDashboard} />
+                ))
             )}
           </div>
         </section>
@@ -718,6 +1010,14 @@ function App() {
         element={
           <ProtectedAdminRoute>
             <AdminDashboardPage />
+          </ProtectedAdminRoute>
+        }
+      />
+      <Route
+        path="/admin/clients/:clientId"
+        element={
+          <ProtectedAdminRoute>
+            <ClientDetailPage />
           </ProtectedAdminRoute>
         }
       />
