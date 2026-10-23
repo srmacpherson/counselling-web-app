@@ -45,7 +45,7 @@ type Booking = {
   enquiry?: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     status: string;
   } | null;
 };
@@ -236,6 +236,7 @@ function MarketingPage() {
                 value={form.message}
                 onChange={(event) => setForm((current) => ({ ...current, message: event.target.value }))}
                 required
+                placeholder='I would like to request a first appointment.'
               />
             </label>
 
@@ -692,7 +693,7 @@ function AdminDashboardPage() {
 
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
 
-  const handleCopyEmailClick = async (email: string) => {
+  const handleCopyEmailClick = async (email: string | null) => {
     if (!email || !navigator.clipboard) {
       return;
     }
@@ -773,25 +774,27 @@ function AdminDashboardPage() {
                     <div>
                       <p className="font-medium text-slate-900">{enquiry.name}</p>
                       <div className="mt-1 flex items-center gap-2">
-                        <p className="text-sm text-slate-500">{enquiry.email}</p>
-                        <button
-                          type="button"
-                          aria-label={`Copy email address ${enquiry.email}`}
-                          title={copiedEmail === enquiry.email ? 'Copied' : `Copy ${enquiry.email}`}
-                          onClick={() => handleCopyEmailClick(enquiry.email)}
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition ${copiedEmail === enquiry.email ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50'}`}
-                        >
-                          {copiedEmail === enquiry.email ? (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-3.5 w-3.5" aria-hidden="true">
-                              <path d="M5 12.5 9.2 16.7 19 6.9" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          ) : (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5" aria-hidden="true">
-                              <path d="M9 9.75A2.75 2.75 0 0 1 11.75 7h6.5A2.75 2.75 0 0 1 21 9.75v6.5A2.75 2.75 0 0 1 18.25 19h-6.5A2.75 2.75 0 0 1 9 16.25v-6.5Z" />
-                              <path d="M15 4.75A2.75 2.75 0 0 0 12.25 2h-6.5A2.75 2.75 0 0 0 3 4.75v6.5A2.75 2.75 0 0 0 5.75 14H9" />
-                            </svg>
-                          )}
-                        </button>
+                        <p className="text-sm text-slate-500">{enquiry.email ?? 'No email provided'}</p>
+                        {enquiry.email ? (
+                          <button
+                            type="button"
+                            aria-label={`Copy email address ${enquiry.email}`}
+                            title={copiedEmail === enquiry.email ? 'Copied' : `Copy ${enquiry.email}`}
+                            onClick={() => handleCopyEmailClick(enquiry.email)}
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition ${copiedEmail === enquiry.email ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50'}`}
+                          >
+                            {copiedEmail === enquiry.email ? (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-3.5 w-3.5" aria-hidden="true">
+                                <path d="M5 12.5 9.2 16.7 19 6.9" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5" aria-hidden="true">
+                                <path d="M9 9.75A2.75 2.75 0 0 1 11.75 7h6.5A2.75 2.75 0 0 1 21 9.75v6.5A2.75 2.75 0 0 1 18.25 19h-6.5A2.75 2.75 0 0 1 9 16.25v-6.5Z" />
+                                <path d="M15 4.75A2.75 2.75 0 0 0 12.25 2h-6.5A2.75 2.75 0 0 0 3 4.75v6.5A2.75 2.75 0 0 0 5.75 14H9" />
+                              </svg>
+                            )}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 
 import { prisma } from '../lib/prisma.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -278,7 +279,7 @@ adminEnquiriesRouter.delete('/clients/:id', requireAdmin, async (req, res) => {
     return;
   }
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.booking.deleteMany({
       where: { clientId },
     });
