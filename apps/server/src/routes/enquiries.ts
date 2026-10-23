@@ -4,11 +4,40 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { requireAdmin } from '../middleware/auth.js';
 
+const mobileNumberSchema = z.string().trim().transform((value) => value.replace(/\s+/g, '')).refine((value) => /^\d{11}$/.test(value), {
+  message: 'Please provide a valid 11-digit mobile number.',
+}).optional().or(z.literal('')).transform((value) => value || undefined);
+
 const publicEnquirySchema = z.object({
   name: z.string().trim().min(2).max(120),
-  email: z.string().trim().email(),
+  email: z.string().trim().email().optional().or(z.literal('')).transform((value) => value || undefined),
+  phone: mobileNumberSchema,
   message: z.string().trim().min(10).max(4000).optional().or(z.literal('')).transform((value) => value || undefined),
   preferredContactMethod: z.enum(['EMAIL', 'PHONE']).optional(),
+}).superRefine((input, ctx) => {
+  if (input.preferredContactMethod === 'EMAIL' && (!input.email || input.email.trim().length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['email'],
+      message: 'An email address is required when the preferred contact method is email.',
+    });
+  }
+
+  if (input.preferredContactMethod === 'PHONE' && (!input.phone || input.phone.trim().length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['phone'],
+      message: 'A phone number is required when the preferred contact method is phone.',
+    });
+  }
+
+  if (!input.email && !input.phone) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['email'],
+      message: 'Please provide either an email address or a phone number.',
+    });
+  }
 });
 
 const updateStatusSchema = z.object({
@@ -96,12 +125,13 @@ publicEnquiriesRouter.post('/enquiries', async (req, res) => {
     return;
   }
 
-  const { name, email, message, preferredContactMethod } = parsed.data;
+  const { name, email, phone, message, preferredContactMethod } = parsed.data;
 
   const enquiry = await prisma.enquiry.create({
     data: {
       name,
-      email,
+      email: email ?? null,
+      phone: phone ?? null,
       message: message ?? null,
       preferredContactMethod: preferredContactMethod ?? undefined,
     },
@@ -295,7 +325,7 @@ adminEnquiriesRouter.post('/enquiries/:id/convert-to-client', requireAdmin, asyn
   const { firstName, lastName } = splitFullName(enquiry.name);
   const existingClient = await prisma.client.findFirst({
     where: {
-      email: enquiry.email,
+      email: enquiry.email ?? undefined,
     },
   });
 
@@ -305,7 +335,8 @@ adminEnquiriesRouter.post('/enquiries/:id/convert-to-client', requireAdmin, asyn
         data: {
           firstName: existingClient.firstName || firstName,
           lastName: existingClient.lastName ?? lastName,
-          email: existingClient.email ?? enquiry.email,
+          email: existingClient.email ?? enquiry.email ?? null,
+          phone: existingClient.phone ?? enquiry.phone ?? null,
           preferredContactMethod: enquiry.preferredContactMethod ?? existingClient.preferredContactMethod,
         },
       })
@@ -313,7 +344,8 @@ adminEnquiriesRouter.post('/enquiries/:id/convert-to-client', requireAdmin, asyn
         data: {
           firstName,
           lastName,
-          email: enquiry.email,
+          email: enquiry.email ?? null,
+          phone: enquiry.phone ?? null,
           preferredContactMethod: enquiry.preferredContactMethod ?? undefined,
           notes: `Converted from enquiry received ${new Date(enquiry.receivedAt).toISOString()}`,
         },

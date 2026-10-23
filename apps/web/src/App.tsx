@@ -10,7 +10,8 @@ type User = {
 type Enquiry = {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   message: string | null;
   status: string;
   preferredContactMethod: string | null;
@@ -107,6 +108,7 @@ function MarketingPage() {
   const [form, setForm] = useState({
     name: '',
     email: '',
+    phone: '',
     message: '',
     preferredContactMethod: 'EMAIL',
   });
@@ -127,7 +129,7 @@ function MarketingPage() {
       });
 
       setSuccessMessage('Thanks for your message. Mike will be in touch soon.');
-      setForm({ name: '', email: '', message: '', preferredContactMethod: 'EMAIL' });
+      setForm({ name: '', email: '', phone: '', message: '', preferredContactMethod: 'EMAIL' });
     } catch (submissionError) {
       setErrorMessage(submissionError instanceof Error ? submissionError.message : 'Unable to send your enquiry right now.');
     } finally {
@@ -188,17 +190,6 @@ function MarketingPage() {
             </label>
 
             <label className="block text-sm font-medium text-slate-700 md:col-span-1">
-              Email
-              <input
-                type="email"
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
-                value={form.email}
-                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                required
-              />
-            </label>
-
-            <label className="block text-sm font-medium text-slate-700 md:col-span-2">
               Preferred contact method
               <select
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
@@ -208,6 +199,33 @@ function MarketingPage() {
                 <option value="EMAIL">Email</option>
                 <option value="PHONE">Phone</option>
               </select>
+            </label>
+
+            <label className="block text-sm font-medium text-slate-700 md:col-span-1">
+              Email
+              <input
+                type="email"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                required={form.preferredContactMethod === 'EMAIL'}
+                placeholder={form.preferredContactMethod === 'PHONE' ? 'Optional' : 'user@example.com'}
+              />
+            </label>
+
+            <label className="block text-sm font-medium text-slate-700 md:col-span-1">
+              Mobile number
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={11}
+                pattern="[0-9]{11}"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                value={form.phone}
+                onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value.replace(/\D/g, '').slice(0, 11) }))}
+                required={form.preferredContactMethod === 'PHONE'}
+                placeholder={form.preferredContactMethod === 'EMAIL' ? 'Optional' : '11-digit mobile number'}
+              />
             </label>
 
             <label className="block text-sm font-medium text-slate-700 md:col-span-2">

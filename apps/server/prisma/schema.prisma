@@ -65,7 +65,8 @@ model Session {
 model Enquiry {
   id                     String        @id @default(cuid())
   name                   String
-  email                  String
+  email                  String?
+  phone                  String?
   message                String?
   preferredContactMethod ContactMethod?
   status                 EnquiryStatus @default(NEW)
