@@ -12,7 +12,7 @@ const publicEnquirySchema = z.object({
 });
 
 const updateStatusSchema = z.object({
-  status: z.enum(['NEW', 'CONTACTED', 'AWAITING_RESPONSE', 'CONVERTED_TO_CLIENT', 'CLOSED', 'SPAM']),
+  status: z.enum(['NEW', 'AWAITING_RESPONSE', 'CONVERTED_TO_CLIENT', 'CLOSED', 'SPAM']),
 });
 
 const bookingSchema = z.object({
@@ -25,9 +25,22 @@ const bookingSchema = z.object({
     message: 'End time must be a valid date.',
   }),
   timezone: z.string().trim().min(1).default('Europe/London'),
-  status: z.enum(['PENDING', 'CONFIRMED', 'RESCHEDULED', 'CANCELLED', 'COMPLETED', 'NO_SHOW']).default('PENDING'),
+  status: z.enum(['SCHEDULED', 'CANCELLED', 'COMPLETED', 'NO_SHOW']).default('SCHEDULED'),
   location: z.string().trim().max(200).optional().nullable().transform((value) => value || null),
   notes: z.string().trim().max(2000).optional().nullable().transform((value) => value || null),
+});
+
+const bookingUpdateSchema = z.object({
+  startsAt: z.string().trim().refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: 'Start time must be a valid date.',
+  }).optional(),
+  endsAt: z.string().trim().refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: 'End time must be a valid date.',
+  }).optional(),
+  timezone: z.string().trim().min(1).optional(),
+  status: z.enum(['SCHEDULED', 'CANCELLED', 'COMPLETED', 'NO_SHOW']).optional(),
+  location: z.string().trim().max(200).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
 });
 
 async function createAuditEvent(input: {
@@ -109,8 +122,8 @@ adminEnquiriesRouter.get('/me', requireAdmin, (req, res) => {
 
 adminEnquiriesRouter.get('/dashboard', requireAdmin, async (_req, res) => {
   const [openEnquiries, upcomingSessions, alertCount] = await Promise.all([
-    prisma.enquiry.count({ where: { status: { in: ['NEW', 'CONTACTED', 'AWAITING_RESPONSE'] } } }),
-    prisma.booking.count({ where: { startsAt: { gte: new Date() }, status: { in: ['PENDING', 'CONFIRMED'] } } }),
+    prisma.enquiry.count({ where: { status: { in: ['NEW', 'AWAITING_RESPONSE'] } } }),
+    prisma.booking.count({ where: { startsAt: { gte: new Date() }, status: 'SCHEDULED' } }),
     prisma.enquiry.count({ where: { status: 'AWAITING_RESPONSE' } }),
   ]);
 
@@ -186,6 +199,35 @@ adminEnquiriesRouter.get('/clients', requireAdmin, async (_req, res) => {
   res.json({
     ok: true,
     clients,
+  });
+});
+
+adminEnquiriesRouter.get('/clients/:id', requireAdmin, async (req, res) => {
+  const clientId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    include: {
+      bookings: {
+        orderBy: { startsAt: 'asc' },
+        include: {
+          enquiry: true,
+        },
+      },
+    },
+  });
+
+  if (!client) {
+    res.status(404).json({
+      ok: false,
+      message: 'Client not found.',
+    });
+    return;
+  }
+
+  res.json({
+    ok: true,
+    client,
   });
 });
 
@@ -311,7 +353,7 @@ adminEnquiriesRouter.post('/enquiries/:id/acknowledge', requireAdmin, async (req
 
   await prisma.enquiry.update({
     where: { id: enquiry.id },
-    data: { status: 'CONTACTED' },
+    data: { status: 'AWAITING_RESPONSE' },
   });
 
   await createAuditEvent({
@@ -341,6 +383,132 @@ adminEnquiriesRouter.get('/bookings', requireAdmin, async (_req, res) => {
   res.json({
     ok: true,
     bookings,
+  });
+});
+
+adminEnquiriesRouter.patch('/bookings/:id', requireAdmin, async (req, res) => {
+  const bookingId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = bookingUpdateSchema.safeParse(req.body ?? {});
+
+  if (!parsed.success) {
+    res.status(400).json({
+      ok: false,
+      message: 'Please provide valid booking updates.',
+      issues: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const existingBooking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      client: true,
+    },
+  });
+
+  if (!existingBooking) {
+    res.status(404).json({
+      ok: false,
+      message: 'Booking not found.',
+    });
+    return;
+  }
+
+  const nextStartsAt = parsed.data.startsAt ? new Date(parsed.data.startsAt) : existingBooking.startsAt;
+  const nextEndsAt = parsed.data.endsAt ? new Date(parsed.data.endsAt) : existingBooking.endsAt;
+
+  if (Number.isNaN(nextStartsAt.getTime()) || Number.isNaN(nextEndsAt.getTime()) || nextEndsAt <= nextStartsAt) {
+    res.status(400).json({
+      ok: false,
+      message: 'The booking start and end times must be valid and the end time must be later than the start time.',
+    });
+    return;
+  }
+
+  const nextStatus = parsed.data.status ?? existingBooking.status;
+  const didReschedule =
+    parsed.data.startsAt !== undefined || parsed.data.endsAt !== undefined || parsed.data.timezone !== undefined;
+
+  const booking = await prisma.booking.update({
+    where: { id: bookingId },
+    data: {
+      startsAt: nextStartsAt,
+      endsAt: nextEndsAt,
+      timezone: parsed.data.timezone ?? existingBooking.timezone,
+      status: nextStatus,
+      location: parsed.data.location ?? existingBooking.location,
+      notes: parsed.data.notes ?? existingBooking.notes,
+      cancelledAt: existingBooking.cancelledAt,
+    },
+    include: {
+      client: true,
+    },
+  });
+
+  await createAuditEvent({
+    entityType: 'BOOKING',
+    entityId: booking.id,
+    action: didReschedule ? 'BOOKING_RESCHEDULED' : 'BOOKING_UPDATED',
+    details: didReschedule
+      ? `Rescheduled booking for ${existingBooking.client.firstName}`
+      : `Updated booking for ${existingBooking.client.firstName}`,
+    adminUserId: req.admin?.id ?? null,
+    clientId: booking.clientId,
+    bookingId: booking.id,
+    enquiryId: booking.enquiryId ?? null,
+  });
+
+  res.json({
+    ok: true,
+    booking,
+  });
+});
+
+adminEnquiriesRouter.post('/bookings/:id/cancel', requireAdmin, async (req, res) => {
+  const bookingId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      client: true,
+      enquiry: true,
+    },
+  });
+
+  if (!booking) {
+    res.status(404).json({
+      ok: false,
+      message: 'Booking not found.',
+    });
+    return;
+  }
+
+  const updatedBooking = await prisma.booking.update({
+    where: { id: bookingId },
+    data: {
+      status: 'CANCELLED',
+      cancelledAt: new Date(),
+    },
+    include: {
+      client: true,
+      enquiry: true,
+    },
+  });
+
+  await createAuditEvent({
+    entityType: 'BOOKING',
+    entityId: updatedBooking.id,
+    action: 'BOOKING_CANCELLED',
+    details: `Cancelled booking for ${updatedBooking.client.firstName}`,
+    adminUserId: req.admin?.id ?? null,
+    clientId: updatedBooking.clientId,
+    bookingId: updatedBooking.id,
+    enquiryId: updatedBooking.enquiryId ?? null,
+  });
+
+  res.json({
+    ok: true,
+    booking: updatedBooking,
   });
 });
 

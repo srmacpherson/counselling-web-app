@@ -14,7 +14,6 @@ enum ContactMethod {
 
 enum EnquiryStatus {
   NEW
-  CONTACTED
   AWAITING_RESPONSE
   CONVERTED_TO_CLIENT
   CLOSED
@@ -22,9 +21,7 @@ enum EnquiryStatus {
 }
 
 enum BookingStatus {
-  PENDING
-  CONFIRMED
-  RESCHEDULED
+  SCHEDULED
   CANCELLED
   COMPLETED
   NO_SHOW
@@ -131,7 +128,7 @@ model Booking {
   startsAt        DateTime
   endsAt          DateTime
   timezone        String          @default("Europe/London")
-  status          BookingStatus   @default(PENDING)
+  status          BookingStatus   @default(SCHEDULED)
   location        String?
   notes           String?
   createdAt       DateTime        @default(now())
