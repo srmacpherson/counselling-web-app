@@ -63,10 +63,24 @@ model AdminUser {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   lastLoginAt   DateTime?
+  sessions      Session[]
   auditEvents   AuditEvent[]
   emailRecords  EmailNotification[]
 
   @@index([email])
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique
+  adminUserId  String
+  adminUser    AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  lastSeenAt   DateTime  @default(now())
+  revokedAt    DateTime?
+
+  @@index([adminUserId, expiresAt])
 }
 
 model Enquiry {
