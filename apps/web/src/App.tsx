@@ -7,6 +7,22 @@ type User = {
   name: string | null;
 };
 
+type Enquiry = {
+  id: string;
+  name: string;
+  email: string;
+  message: string | null;
+  status: string;
+  preferredContactMethod: string | null;
+  receivedAt: string;
+};
+
+type DashboardStats = {
+  openEnquiries: number;
+  upcomingSessions: number;
+  alerts: number;
+};
+
 const API_BASE = 'http://localhost:4000';
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -29,6 +45,37 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 function MarketingPage() {
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    message: '',
+    preferredContactMethod: 'EMAIL',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      await api<{ ok: true }>('/api/enquiries', {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+
+      setSuccessMessage('Thanks for your message. Mike will be in touch soon.');
+      setForm({ name: '', email: '', message: '', preferredContactMethod: 'EMAIL' });
+    } catch (submissionError) {
+      setErrorMessage(submissionError instanceof Error ? submissionError.message : 'Unable to send your enquiry right now.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-stone-50 text-slate-800">
       <section className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-6 py-16">
@@ -60,6 +107,72 @@ function MarketingPage() {
           >
             Admin login
           </a>
+        </div>
+      </section>
+
+      <section id="contact" className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-soft">
+          <div className="mb-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Contact</p>
+            <h2 className="mt-2 text-3xl font-semibold text-slate-900">Ask a question or request a first appointment</h2>
+          </div>
+
+          <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
+            <label className="block text-sm font-medium text-slate-700 md:col-span-1">
+              Name
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                required
+              />
+            </label>
+
+            <label className="block text-sm font-medium text-slate-700 md:col-span-1">
+              Email
+              <input
+                type="email"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                required
+              />
+            </label>
+
+            <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+              Preferred contact method
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                value={form.preferredContactMethod}
+                onChange={(event) => setForm((current) => ({ ...current, preferredContactMethod: event.target.value }))}
+              >
+                <option value="EMAIL">Email</option>
+                <option value="PHONE">Phone</option>
+              </select>
+            </label>
+
+            <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+              Message
+              <textarea
+                rows={5}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                value={form.message}
+                onChange={(event) => setForm((current) => ({ ...current, message: event.target.value }))}
+                required
+              />
+            </label>
+
+            {successMessage ? <p className="text-sm text-emerald-600 md:col-span-2">{successMessage}</p> : null}
+            {errorMessage ? <p className="text-sm text-red-600 md:col-span-2">{errorMessage}</p> : null}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70 md:col-span-2"
+            >
+              {isSubmitting ? 'Sending…' : 'Send enquiry'}
+            </button>
+          </form>
         </div>
       </section>
     </main>
@@ -183,16 +296,39 @@ function ProtectedAdminRoute({ children }: { children: ReactNode }) {
 function AdminDashboardPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
+  const [stats, setStats] = useState<DashboardStats>({ openEnquiries: 0, upcomingSessions: 0, alerts: 0 });
+  const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
+
+  const loadDashboard = async () => {
+    const [dashboardResponse, enquiryResponse] = await Promise.all([
+      api<{ stats: DashboardStats }>('/api/admin/dashboard'),
+      api<{ enquiries: Enquiry[] }>('/api/admin/enquiries'),
+    ]);
+
+    setStats(dashboardResponse.stats);
+    setEnquiries(enquiryResponse.enquiries);
+  };
 
   useEffect(() => {
     api<{ user: User }>('/api/admin/me')
       .then((response) => setUser(response.user))
       .catch(() => navigate('/admin/login'));
+
+    loadDashboard().catch(() => navigate('/admin/login'));
   }, [navigate]);
 
   const handleLogout = async () => {
     await api('/api/auth/logout', { method: 'POST' });
     navigate('/admin/login');
+  };
+
+  const handleStatusChange = async (enquiryId: string, nextStatus: string) => {
+    await api(`/api/admin/enquiries/${enquiryId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: nextStatus }),
+    });
+
+    await loadDashboard();
   };
 
   return (
@@ -214,16 +350,59 @@ function AdminDashboardPage() {
 
         <section className="grid gap-4 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
-            <p className="text-sm text-slate-500">New enquiries</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">0</p>
+            <p className="text-sm text-slate-500">Open enquiries</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.openEnquiries}</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <p className="text-sm text-slate-500">Upcoming sessions</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">0</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.upcomingSessions}</p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <p className="text-sm text-slate-500">Alerts</p>
-            <p className="mt-3 text-3xl font-semibold text-slate-900">0</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{stats.alerts}</p>
+          </div>
+        </section>
+
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Inbox</p>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900">Recent enquiries</h2>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {enquiries.length === 0 ? (
+              <p className="text-sm text-slate-500">No enquiries yet.</p>
+            ) : (
+              enquiries.map((enquiry) => (
+                <div key={enquiry.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium text-slate-900">{enquiry.name}</p>
+                      <p className="text-sm text-slate-500">{enquiry.email}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">{enquiry.status}</span>
+                      <select
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700"
+                        value={enquiry.status}
+                        onChange={(event) => handleStatusChange(enquiry.id, event.target.value)}
+                      >
+                        <option value="NEW">NEW</option>
+                        <option value="CONTACTED">CONTACTED</option>
+                        <option value="AWAITING_RESPONSE">AWAITING_RESPONSE</option>
+                        <option value="CONVERTED_TO_CLIENT">CONVERTED_TO_CLIENT</option>
+                        <option value="CLOSED">CLOSED</option>
+                        <option value="SPAM">SPAM</option>
+                      </select>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">{enquiry.message ?? 'No message provided.'}</p>
+                  <p className="mt-2 text-xs text-slate-500">Received {new Date(enquiry.receivedAt).toLocaleString()}</p>
+                </div>
+              ))
+            )}
           </div>
         </section>
       </div>

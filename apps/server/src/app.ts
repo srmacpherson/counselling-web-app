@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import { env } from './config/env.js';
 import { authRouter } from './routes/auth.js';
-import { requireAdmin } from './middleware/auth.js';
+import { adminEnquiriesRouter, publicEnquiriesRouter } from './routes/enquiries.js';
 
 const app = express();
 const allowedOrigins = env.CORS_ORIGIN.split(',')
@@ -46,6 +46,8 @@ app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/auth', authRouter);
+app.use('/api', publicEnquiriesRouter);
+app.use('/api/admin', adminEnquiriesRouter);
 
 app.get('/health', (_req, res) => {
   res.json({
@@ -61,24 +63,6 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     service: 'server',
     environment: env.NODE_ENV,
-  });
-});
-
-app.get('/api/admin/me', requireAdmin, (req, res) => {
-  res.json({
-    ok: true,
-    user: req.admin,
-  });
-});
-
-app.get('/api/admin/dashboard', requireAdmin, (_req, res) => {
-  res.json({
-    ok: true,
-    stats: {
-      openEnquiries: 0,
-      upcomingSessions: 0,
-      alerts: 0,
-    },
   });
 });
 
