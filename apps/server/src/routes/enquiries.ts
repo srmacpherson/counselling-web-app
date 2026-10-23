@@ -212,6 +212,10 @@ adminEnquiriesRouter.get('/clients/:id', requireAdmin, async (req, res) => {
           enquiry: true,
         },
       },
+      auditEvents: {
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+      },
     },
   });
 
@@ -351,25 +355,14 @@ adminEnquiriesRouter.post('/enquiries/:id/convert-to-client', requireAdmin, asyn
 });
 
 adminEnquiriesRouter.get('/activity', requireAdmin, async (_req, res) => {
-  const [auditEvents, notifications] = await Promise.all([
-    prisma.auditEvent.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    }),
-    prisma.emailNotification.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-      include: {
-        enquiry: true,
-        client: true,
-      },
-    }),
-  ]);
+  const auditEvents = await prisma.auditEvent.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  });
 
   res.json({
     ok: true,
     auditEvents,
-    notifications,
   });
 });
 

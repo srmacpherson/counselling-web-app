@@ -58,15 +58,6 @@ type AuditEvent = {
   createdAt: string;
 };
 
-type Notification = {
-  id: string;
-  type: string;
-  status: string;
-  recipientEmail: string;
-  subject: string;
-  createdAt: string;
-};
-
 type DashboardStats = {
   openEnquiries: number;
   upcomingSessions: number;
@@ -464,7 +455,7 @@ function BookingCard({ booking, onRefresh, showClientName = true }: { booking: B
 function ClientDetailPage() {
   const navigate = useNavigate();
   const { clientId } = useParams();
-  const [client, setClient] = useState<(Client & { bookings: Booking[] }) | null>(null);
+  const [client, setClient] = useState<(Client & { bookings: Booking[]; auditEvents?: AuditEvent[] }) | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadClient = async () => {
@@ -472,7 +463,7 @@ function ClientDetailPage() {
       return;
     }
 
-    const response = await api<{ client: Client & { bookings: Booking[] } }>(`/api/admin/clients/${clientId}`);
+    const response = await api<{ client: Client & { bookings: Booking[]; auditEvents?: AuditEvent[] } }>(`/api/admin/clients/${clientId}`);
     setClient(response.client);
   };
 
@@ -548,7 +539,7 @@ function ClientDetailPage() {
           </div>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-2">
+        <section className="mt-8 grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Upcoming bookings</p>
             <div className="mt-4 space-y-3">
@@ -575,6 +566,24 @@ function ClientDetailPage() {
             </div>
           </div>
         </section>
+
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Events</p>
+
+          <div className="mt-4 space-y-3">
+            {((client.auditEvents ?? []).length === 0) ? (
+              <p className="text-sm text-slate-500">No communications or updates recorded yet.</p>
+            ) : (
+              (client.auditEvents ?? []).map((event) => (
+                <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="font-medium text-slate-900">{event.action}</p>
+                  <p className="text-sm text-slate-500">{event.details ?? 'No details provided.'}</p>
+                  <p className="mt-1 text-xs text-slate-400">{new Date(event.createdAt).toLocaleString()}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
       </div>
     </main>
   );
@@ -587,9 +596,8 @@ function AdminDashboardPage() {
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [activity, setActivity] = useState<{ auditEvents: AuditEvent[]; notifications: Notification[] }>({
+  const [activity, setActivity] = useState<{ auditEvents: AuditEvent[] }>({
     auditEvents: [],
-    notifications: [],
   });
   const [bookingForm, setBookingForm] = useState({
     clientId: '',
@@ -606,7 +614,7 @@ function AdminDashboardPage() {
       api<{ enquiries: Enquiry[] }>('/api/admin/enquiries'),
       api<{ clients: Client[] }>('/api/admin/clients'),
       api<{ bookings: Booking[] }>('/api/admin/bookings'),
-      api<{ auditEvents: AuditEvent[]; notifications: Notification[] }>('/api/admin/activity'),
+      api<{ auditEvents: AuditEvent[] }>('/api/admin/activity'),
     ]);
 
     setStats(dashboardResponse.stats);
@@ -615,7 +623,6 @@ function AdminDashboardPage() {
     setBookings(bookingResponse.bookings);
     setActivity({
       auditEvents: activityResponse.auditEvents,
-      notifications: activityResponse.notifications,
     });
   };
 
@@ -953,46 +960,22 @@ function AdminDashboardPage() {
           </div>
         </section>
 
-        <section className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Audit trail</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-900">Recent admin activity</h2>
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Audit trail</p>
+          <h2 className="mt-2 text-xl font-semibold text-slate-900">Recent admin activity</h2>
 
-            <div className="mt-4 space-y-3">
-              {activity.auditEvents.length === 0 ? (
-                <p className="text-sm text-slate-500">No recent actions.</p>
-              ) : (
-                activity.auditEvents.map((event) => (
-                  <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="font-medium text-slate-900">{event.action}</p>
-                    <p className="text-sm text-slate-500">{event.details ?? 'No details provided.'}</p>
-                    <p className="mt-1 text-xs text-slate-400">{new Date(event.createdAt).toLocaleString()}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Email queue</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-900">Queued notifications</h2>
-
-            <div className="mt-4 space-y-3">
-              {activity.notifications.length === 0 ? (
-                <p className="text-sm text-slate-500">No queued notifications.</p>
-              ) : (
-                activity.notifications.map((notification) => (
-                  <div key={notification.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-slate-900">{notification.subject}</p>
-                      <span className="rounded-full bg-brand-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-800">{notification.status}</span>
-                    </div>
-                    <p className="text-sm text-slate-500">{notification.recipientEmail}</p>
-                    <p className="mt-1 text-xs text-slate-400">{new Date(notification.createdAt).toLocaleString()}</p>
-                  </div>
-                ))
-              )}
-            </div>
+          <div className="mt-4 space-y-3">
+            {activity.auditEvents.length === 0 ? (
+              <p className="text-sm text-slate-500">No recent actions.</p>
+            ) : (
+              activity.auditEvents.map((event) => (
+                <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="font-medium text-slate-900">{event.action}</p>
+                  <p className="text-sm text-slate-500">{event.details ?? 'No details provided.'}</p>
+                  <p className="mt-1 text-xs text-slate-400">{new Date(event.createdAt).toLocaleString()}</p>
+                </div>
+              ))
+            )}
           </div>
         </section>
       </div>
