@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w apps/web && npm run typecheck -w apps/server",
     "db:generate": "npm run db:generate -w apps/server",
     "db:migrate": "npm run db:migrate -w apps/server",
+    "db:seed": "npm run db:seed -w apps/server",
     "db:studio": "npm run db:studio -w apps/server"
   },
   "devDependencies": {

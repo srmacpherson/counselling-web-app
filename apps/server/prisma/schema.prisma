@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ContactMethod {
+  EMAIL
+  PHONE
+}
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  AWAITING_RESPONSE
+  CONVERTED_TO_CLIENT
+  CLOSED
+  SPAM
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  RESCHEDULED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum NotificationType {
+  NEW_ENQUIRY
+  ENQUIRY_ACKNOWLEDGEMENT
+  BOOKING_CONFIRMED
+  BOOKING_RESCHEDULED
+  BOOKING_CANCELLED
+  BOOKING_REMINDER
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  REJECTED
+}
+
+enum AuditEntityType {
+  ADMIN_USER
+  ENQUIRY
+  CLIENT
+  BOOKING
+}
+
+model AdminUser {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String
+  name          String?
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  lastLoginAt   DateTime?
+  auditEvents   AuditEvent[]
+  emailRecords  EmailNotification[]
+
+  @@index([email])
+}
+
+model Enquiry {
+  id                     String          @id @default(cuid())
+  name                   String
+  email                  String
+  message                String?
+  preferredContactMethod ContactMethod?
+  status                 EnquiryStatus   @default(NEW)
+  adminNotes             String?
+  receivedAt             DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  clientId               String?
+  client                 Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  bookings               Booking[]
+  empathyEmailRecords    EmailNotification[]
+  auditEvents            AuditEvent[]
+
+  @@index([status, receivedAt])
+  @@index([email])
+}
+
+model Client {
+  id                     String          @id @default(cuid())
+  firstName              String
+  lastName               String?
+  email                  String?
+  phone                  String?
+  preferredContactMethod ContactMethod?
+  notes                  String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  enquiries              Enquiry[]
+  bookings               Booking[]
+  emailRecords           EmailNotification[]
+  auditEvents            AuditEvent[]
+
+  @@index([email])
+  @@index([lastName, firstName])
+}
+
+model Booking {
+  id              String          @id @default(cuid())
+  clientId        String
+  client          Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  enquiryId       String?
+  enquiry         Enquiry?        @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+  startsAt        DateTime
+  endsAt          DateTime
+  timezone        String          @default("Europe/London")
+  status          BookingStatus   @default(PENDING)
+  location        String?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  cancelledAt     DateTime?
+  emailRecords    EmailNotification[]
+  auditEvents     AuditEvent[]
+
+  @@index([clientId, startsAt])
+  @@index([startsAt])
+}
+
+model EmailNotification {
+  id                String              @id @default(cuid())
+  type              NotificationType
+  status            NotificationStatus   @default(QUEUED)
+  recipientEmail    String
+  subject           String
+  providerMessageId String?
+  attemptCount      Int                 @default(0)
+  lastError         String?
+  sentAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  enquiryId         String?
+  enquiry           Enquiry?            @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+  clientId          String?
+  client            Client?             @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  bookingId         String?
+  booking           Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  adminUserId       String?
+  adminUser        AdminUser?          @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([type, createdAt])
+}
+
+model AuditEvent {
+  id          String         @id @default(cuid())
+  entityType  AuditEntityType
+  entityId    String
+  action      String
+  details     String?
+  createdAt   DateTime       @default(now())
+  adminUserId String?
+  adminUser   AdminUser?     @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  enquiryId   String?
+  enquiry     Enquiry?       @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+  clientId    String?
+  client      Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  bookingId   String?
+  booking     Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
