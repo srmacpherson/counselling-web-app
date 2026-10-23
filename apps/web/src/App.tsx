@@ -229,16 +229,22 @@ function MarketingPage() {
             </label>
 
             <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-              Message
-              <textarea
+            Message
+            <textarea
                 rows={5}
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-slate-900 outline-none transition focus:border-brand-600 focus:bg-white focus:ring-2 focus:ring-brand-100"
                 value={form.message}
                 onChange={(event) => setForm((current) => ({ ...current, message: event.target.value }))}
+                onFocus={(event) => {
+                if (!form.message) {
+                    setForm((current) => ({ ...current, message: event.target.placeholder }));
+                }
+                }}
                 required
-                placeholder='I would like to request a first appointment.'
-              />
+                placeholder="I would like to request a first appointment."
+            />
             </label>
+
 
             {successMessage ? <p className="text-sm text-emerald-600 md:col-span-2">{successMessage}</p> : null}
             {errorMessage ? <p className="text-sm text-red-600 md:col-span-2">{errorMessage}</p> : null}
