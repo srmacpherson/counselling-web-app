@@ -1,25 +1,34 @@
-# Counselling practice web app
+# Counselling web app
 
-A production-minded full-stack TypeScript application for a counselling practice. The current implementation includes a public marketing landing page, a secure admin login flow, protected admin routes, a PostgreSQL-backed data model, and a modular monolith structure ready for the next business feature set.
+A full-stack TypeScript application for a counselling practice, covering both the public-facing marketing site and the internal admin workflow.
 
-## Overview
+## What is included
 
-This project is structured as a TypeScript monorepo:
+This project currently includes:
 
-- `apps/web`: React + Vite frontend for the public site and admin interface
-- `apps/server`: Express + Prisma + PostgreSQL backend
-- `packages/shared`: shared validation and domain logic
+- a public enquiry form with validation and preferred-contact handling
+- an authenticated admin dashboard
+- enquiry tracking and status updates
+- client records and client deletion flow with confirmation
+- booking creation, rescheduling, and cancellation
+- audit/event history for admin actions
+- PostgreSQL persistence via Prisma
+- local development setup with Docker and seeded admin credentials
 
-The application is designed for a UK-based counselling service with a clear separation between public content and authenticated admin operations.
+## Project structure
+
+- `apps/web`: React + Vite frontend
+- `apps/server`: Express + Prisma + PostgreSQL API
+- `packages/shared`: shared TypeScript utilities and domain logic
 
 ## Tech stack
 
 - React 18 + TypeScript + Vite
 - Express + TypeScript
-- PostgreSQL via Prisma ORM
-- Argon2 password hashing
-- HTTP-only session cookies for admin authentication
+- Prisma ORM + PostgreSQL
 - Docker Compose for local database provisioning
+- HTTP-only session cookies for admin auth
+- Argon2 password hashing
 
 ## Prerequisites
 
@@ -27,93 +36,92 @@ The application is designed for a UK-based counselling service with a clear sepa
 - npm 10+
 - Docker Desktop or Docker Engine
 
-## Local development setup
+## Local setup
 
 1. Install dependencies:
    - `npm install`
-2. Ensure the root `.env` file exists. This repo includes a root-level `.env` with the local database and admin credentials for development.
+2. Make sure the root `.env` file exists. See `.env.example` for the expected shape.
 3. Start PostgreSQL:
    - `docker compose up -d postgres`
 4. Generate the Prisma client and apply migrations:
    - `npm run db:generate`
    - `npm run db:migrate`
-5. Seed the initial admin user:
+5. Seed the database:
    - `npm run db:seed`
 
-## Run the app
+## Run locally
 
 Start both frontend and backend together:
 
 - `npm run dev`
 
-Run them individually:
+Or run them separately:
 
 - Frontend: `npm run dev -w apps/web`
 - Backend: `npm run dev -w apps/server`
 
-## Important configuration notes
+The app is typically available at:
 
-- The database is configured to run on port `5433` to avoid conflicts with any local PostgreSQL instance already running on `5432`.
-- The project expects a root-level `.env` file with values such as:
-  - `DATABASE_URL`
-  - `CORS_ORIGIN`
-  - `SESSION_SECRET`
-  - `COOKIE_NAME`
-  - `ADMIN_EMAIL`
-  - `ADMIN_PASSWORD`
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:4000`
 
-## Admin authentication
+## Environment configuration
 
-The application includes a secure admin login flow:
+The project expects a root-level `.env` file with values such as:
 
-- login endpoint: `POST /api/auth/login`
-- logout endpoint: `POST /api/auth/logout`
-- authenticated session check: `GET /api/admin/me`
+- `DATABASE_URL`
+- `CORS_ORIGIN`
+- `SESSION_SECRET`
+- `COOKIE_NAME`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
 
-The frontend includes:
+The local database is configured for port `5433` to avoid conflicts with any existing local PostgreSQL instance.
 
-- public landing page at `/`
-- admin login page at `/admin/login`
-- protected admin dashboard at `/admin`
+## Admin access
 
-By default, the local seed admin is created as:
+The app includes a secure admin login flow:
+
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/admin/me`
+
+Default local admin credentials:
 
 - Email: `admin@example.com`
 - Password: `ChangeMeStronglyBeforeUse123!`
 
-> Change this before any shared or production environment is used.
+> Use these only for local development. Change them before any shared or production use.
 
-## Database and Prisma
+## Database and Prisma commands
 
-Use Prisma commands from the repo root:
+From the repo root:
 
 - `npm run db:generate`
 - `npm run db:migrate`
 - `npm run db:seed`
 - `npm run db:studio`
 
-## Common maintenance commands
+## Useful commands
 
-- Build the project: `npm run build`
+- Build app: `npm run build`
 - Lint: `npm run lint`
 - Type-check: `npm run typecheck`
 
-## Security and privacy notes
+## Current feature set
 
-- Keep secrets out of source control.
-- Use HTTP-only cookies for authenticated admin sessions.
-- Prefer Argon2 hashing for password storage.
-- Do not use real production credentials in local development.
-- Separate public content from staff-only administrative functionality.
-- Be careful with all counselling-related data and avoid storing unnecessary sensitive details.
+The current application includes core operational flows for a counselling service:
 
-## Current project status
+- public enquiries with email/phone validation
+- conditional preferred-contact validation
+- recent enquiries inbox and status updates
+- client records linked to enquiries and bookings
+- appointment scheduling and booking lifecycle actions
+- audit trail for admin changes
+- confirmation step before deleting a client and associated data
 
-The foundation is in place and the project is moving from setup into business feature implementation. The current milestone includes:
+## Notes
 
-- modular monorepo structure
-- PostgreSQL and Prisma setup
-- database migration and seed workflow
-- working admin authentication and protected dashboard shell
-
-The next phase will focus on operational admin functionality such as enquiries, clients, bookings and internal workflow management.
+- This project is designed for local development and operational tooling, not yet as a production-hardening guide.
+- Secrets should always remain out of source control.
+- Keep client contact data protected and only store what is needed for the business process.
