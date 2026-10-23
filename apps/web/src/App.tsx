@@ -40,6 +40,24 @@ type Booking = {
   client: Client;
 };
 
+type AuditEvent = {
+  id: string;
+  action: string;
+  details: string | null;
+  entityType: string;
+  entityId: string;
+  createdAt: string;
+};
+
+type Notification = {
+  id: string;
+  type: string;
+  status: string;
+  recipientEmail: string;
+  subject: string;
+  createdAt: string;
+};
+
 type DashboardStats = {
   openEnquiries: number;
   upcomingSessions: number;
@@ -323,6 +341,10 @@ function AdminDashboardPage() {
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [activity, setActivity] = useState<{ auditEvents: AuditEvent[]; notifications: Notification[] }>({
+    auditEvents: [],
+    notifications: [],
+  });
   const [bookingForm, setBookingForm] = useState({
     clientId: '',
     enquiryId: '',
@@ -333,17 +355,22 @@ function AdminDashboardPage() {
   });
 
   const loadDashboard = async () => {
-    const [dashboardResponse, enquiryResponse, clientResponse, bookingResponse] = await Promise.all([
+    const [dashboardResponse, enquiryResponse, clientResponse, bookingResponse, activityResponse] = await Promise.all([
       api<{ stats: DashboardStats }>('/api/admin/dashboard'),
       api<{ enquiries: Enquiry[] }>('/api/admin/enquiries'),
       api<{ clients: Client[] }>('/api/admin/clients'),
       api<{ bookings: Booking[] }>('/api/admin/bookings'),
+      api<{ auditEvents: AuditEvent[]; notifications: Notification[] }>('/api/admin/activity'),
     ]);
 
     setStats(dashboardResponse.stats);
     setEnquiries(enquiryResponse.enquiries);
     setClients(clientResponse.clients);
     setBookings(bookingResponse.bookings);
+    setActivity({
+      auditEvents: activityResponse.auditEvents,
+      notifications: activityResponse.notifications,
+    });
   };
 
   useEffect(() => {
@@ -370,6 +397,14 @@ function AdminDashboardPage() {
 
   const handleConvertToClient = async (enquiryId: string) => {
     await api(`/api/admin/enquiries/${enquiryId}/convert-to-client`, {
+      method: 'POST',
+    });
+
+    await loadDashboard();
+  };
+
+  const handleAcknowledgeEnquiry = async (enquiryId: string) => {
+    await api(`/api/admin/enquiries/${enquiryId}/acknowledge`, {
       method: 'POST',
     });
 
@@ -471,17 +506,27 @@ function AdminDashboardPage() {
                   <p className="mt-3 text-sm text-slate-600">{enquiry.message ?? 'No message provided.'}</p>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-xs text-slate-500">Received {new Date(enquiry.receivedAt).toLocaleString()}</p>
-                    {!enquiry.clientId ? (
+                    <div className="flex items-center gap-2">
+                      {!enquiry.clientId ? (
+                        <button
+                          type="button"
+                          onClick={() => handleConvertToClient(enquiry.id)}
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700"
+                        >
+                          Convert to client
+                        </button>
+                      ) : (
+                        <span className="text-xs font-medium text-emerald-700">Client created</span>
+                      )}
+
                       <button
                         type="button"
-                        onClick={() => handleConvertToClient(enquiry.id)}
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700"
+                        onClick={() => handleAcknowledgeEnquiry(enquiry.id)}
+                        className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-800 transition hover:bg-brand-100"
                       >
-                        Convert to client
+                        Queue acknowledgement
                       </button>
-                    ) : (
-                      <span className="text-xs font-medium text-emerald-700">Client created</span>
-                    )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -613,6 +658,49 @@ function AdminDashboardPage() {
                 </div>
               ))
             )}
+          </div>
+        </section>
+
+        <section className="mt-8 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Audit trail</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Recent admin activity</h2>
+
+            <div className="mt-4 space-y-3">
+              {activity.auditEvents.length === 0 ? (
+                <p className="text-sm text-slate-500">No recent actions.</p>
+              ) : (
+                activity.auditEvents.map((event) => (
+                  <div key={event.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="font-medium text-slate-900">{event.action}</p>
+                    <p className="text-sm text-slate-500">{event.details ?? 'No details provided.'}</p>
+                    <p className="mt-1 text-xs text-slate-400">{new Date(event.createdAt).toLocaleString()}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-soft">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Email queue</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Queued notifications</h2>
+
+            <div className="mt-4 space-y-3">
+              {activity.notifications.length === 0 ? (
+                <p className="text-sm text-slate-500">No queued notifications.</p>
+              ) : (
+                activity.notifications.map((notification) => (
+                  <div key={notification.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-slate-900">{notification.subject}</p>
+                      <span className="rounded-full bg-brand-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-800">{notification.status}</span>
+                    </div>
+                    <p className="text-sm text-slate-500">{notification.recipientEmail}</p>
+                    <p className="mt-1 text-xs text-slate-400">{new Date(notification.createdAt).toLocaleString()}</p>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </section>
       </div>

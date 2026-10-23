@@ -30,6 +30,30 @@ const bookingSchema = z.object({
   notes: z.string().trim().max(2000).optional().nullable().transform((value) => value || null),
 });
 
+async function createAuditEvent(input: {
+  entityType: 'ADMIN_USER' | 'ENQUIRY' | 'CLIENT' | 'BOOKING';
+  entityId: string;
+  action: string;
+  details?: string | null;
+  adminUserId?: string | null;
+  enquiryId?: string | null;
+  clientId?: string | null;
+  bookingId?: string | null;
+}) {
+  await prisma.auditEvent.create({
+    data: {
+      entityType: input.entityType,
+      entityId: input.entityId,
+      action: input.action,
+      details: input.details ?? null,
+      adminUserId: input.adminUserId ?? null,
+      enquiryId: input.enquiryId ?? null,
+      clientId: input.clientId ?? null,
+      bookingId: input.bookingId ?? null,
+    },
+  });
+}
+
 function splitFullName(fullName: string): { firstName: string; lastName: string | null } {
   const trimmedName = fullName.trim();
 
@@ -134,6 +158,15 @@ adminEnquiriesRouter.patch('/enquiries/:id/status', requireAdmin, async (req, re
     data: { status: parsed.data.status },
   });
 
+  await createAuditEvent({
+    entityType: 'ENQUIRY',
+    entityId: enquiry.id,
+    action: 'STATUS_UPDATED',
+    details: `Status updated to ${parsed.data.status}`,
+    adminUserId: req.admin?.id ?? null,
+    enquiryId: enquiry.id,
+  });
+
   res.json({
     ok: true,
     enquiry,
@@ -203,10 +236,96 @@ adminEnquiriesRouter.post('/enquiries/:id/convert-to-client', requireAdmin, asyn
     },
   });
 
+  await createAuditEvent({
+    entityType: 'CLIENT',
+    entityId: client.id,
+    action: 'CLIENT_CREATED_FROM_ENQUIRY',
+    details: `Converted from enquiry ${enquiry.id}`,
+    adminUserId: req.admin?.id ?? null,
+    enquiryId: enquiry.id,
+    clientId: client.id,
+  });
+
+  await createAuditEvent({
+    entityType: 'ENQUIRY',
+    entityId: enquiry.id,
+    action: 'CONVERTED_TO_CLIENT',
+    details: `Converted to client ${client.id}`,
+    adminUserId: req.admin?.id ?? null,
+    enquiryId: enquiry.id,
+    clientId: client.id,
+  });
+
   res.json({
     ok: true,
     client,
     enquiry: updatedEnquiry,
+  });
+});
+
+adminEnquiriesRouter.get('/activity', requireAdmin, async (_req, res) => {
+  const [auditEvents, notifications] = await Promise.all([
+    prisma.auditEvent.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    }),
+    prisma.emailNotification.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      include: {
+        enquiry: true,
+        client: true,
+      },
+    }),
+  ]);
+
+  res.json({
+    ok: true,
+    auditEvents,
+    notifications,
+  });
+});
+
+adminEnquiriesRouter.post('/enquiries/:id/acknowledge', requireAdmin, async (req, res) => {
+  const enquiryId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const enquiry = await prisma.enquiry.findUnique({ where: { id: enquiryId } });
+
+  if (!enquiry) {
+    res.status(404).json({
+      ok: false,
+      message: 'Enquiry not found.',
+    });
+    return;
+  }
+
+  const notification = await prisma.emailNotification.create({
+    data: {
+      type: 'ENQUIRY_ACKNOWLEDGEMENT',
+      status: 'QUEUED',
+      recipientEmail: enquiry.email,
+      subject: 'Thanks for getting in touch',
+      enquiryId: enquiry.id,
+      adminUserId: req.admin?.id ?? null,
+    },
+  });
+
+  await prisma.enquiry.update({
+    where: { id: enquiry.id },
+    data: { status: 'CONTACTED' },
+  });
+
+  await createAuditEvent({
+    entityType: 'ENQUIRY',
+    entityId: enquiry.id,
+    action: 'ACKNOWLEDGEMENT_EMAIL_QUEUED',
+    details: `Queued acknowledgement email to ${enquiry.email}`,
+    adminUserId: req.admin?.id ?? null,
+    enquiryId: enquiry.id,
+  });
+
+  res.status(201).json({
+    ok: true,
+    notification,
   });
 });
 
@@ -273,6 +392,17 @@ adminEnquiriesRouter.post('/bookings', requireAdmin, async (req, res) => {
       client: true,
       enquiry: true,
     },
+  });
+
+  await createAuditEvent({
+    entityType: 'BOOKING',
+    entityId: booking.id,
+    action: 'BOOKING_CREATED',
+    details: `Booking scheduled for ${booking.startsAt.toISOString()}`,
+    adminUserId: req.admin?.id ?? null,
+    clientId: booking.clientId,
+    bookingId: booking.id,
+    enquiryId: booking.enquiryId ?? null,
   });
 
   res.status(201).json({
